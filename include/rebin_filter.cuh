@@ -23,6 +23,8 @@
 #define pi 3.1415926535897f
 #define N_PIX 2 // There may be a time in the future were this needs to be more flexible, but for right now, 2 works for all scanners
 
+#define KWIC_OFFSET 2.0f
+
 texture<float,cudaTextureType2D,cudaReadModeElementType> tex_a;
 texture<float,cudaTextureType2D,cudaReadModeElementType> tex_b;
 texture<float,cudaTextureType2D,cudaReadModeElementType> tex_c;
@@ -149,7 +151,7 @@ __global__ void p1_rebin(float* output,float da,int row,float * beta_lookup){
     int n_proj  = d_ri.n_proj_pull/d_ri.n_ffs;
     int out_idx = d_cg.n_channels_oversampled*n_proj*row+n_proj*channel+proj;
 
-    float beta  = asin((channel-2*d_cg.central_channel)*(d_cg.fan_angle_increment/2));
+    float beta  = asin((channel-2.0f*(d_cg.central_channel+KWIC_OFFSET))*(d_cg.fan_angle_increment/2.0f));
     float beta_idx=get_beta_idx(beta,beta_lookup,d_cg.n_channels_oversampled);
     
     output[out_idx]=tex2D(tex_a,proj+0.5f,beta_idx+0.5f); 
@@ -162,7 +164,7 @@ __global__ void p2_rebin(float* output,float da,int row,float * beta_lookup){
     int n_proj  = d_ri.n_proj_pull/d_ri.n_ffs;
     int out_idx = d_cg.n_channels_oversampled*n_proj*row+n_proj*channel+proj;
 
-    float beta  = asin((channel-2*d_cg.central_channel)*(d_cg.fan_angle_increment/2));
+    float beta  = asin((channel-2.0f*(d_cg.central_channel+KWIC_OFFSET))*(d_cg.fan_angle_increment/2.0f));
     float beta_idx=get_beta_idx(beta,beta_lookup,d_cg.n_channels_oversampled);
     
     output[out_idx]=tex2D(tex_b,proj+0.5f,beta_idx+0.5f);     

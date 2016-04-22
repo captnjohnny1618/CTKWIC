@@ -18,7 +18,6 @@
 /* Questions and comments should be directed to */
 /* jmhoffman@mednet.ucla.edu with "CTBANGBANG" in the subject line*/
 
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -36,7 +35,6 @@
 #include <backproject.h>
 #include <backproject_cpu.h>
 
-
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
 {
@@ -49,6 +47,14 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 
 void log(int verbosity, const char *string, ...);
 void split_path_file(char**p, char**f, char *pf);
+void write_float(float * array,size_t numel,const char * file){
+
+    FILE * fid=fopen(file,"w");
+    fwrite(array,sizeof(float),numel,fid);
+    fclose(fid);
+
+}
+
 
 void usage(){
     printf("\n");
@@ -107,9 +113,9 @@ int main(int argc, char ** argv){
 	}
     }
 
-    log(mr.flags.verbose,"\n-------------------------\n"
-	"|      CTBangBang       |\n"
-	"-------------------------\n\n");
+    log(mr.flags.verbose,"\n-----------------------------------------\n"
+	"|      THIS IS NOT CTBangBang!!!!       |\n"
+	"-----------------------------------------\n\n");
 
     log(mr.flags.verbose,"CHECKING INPUT PARAMETERS AND CONFIGURING RECONSTRUCTION\n"
 	"\n");
@@ -209,13 +215,27 @@ int main(int argc, char ** argv){
     log(mr.flags.verbose,"Allowed recon range: %.2f to %.2f\n",mr.ri.allowed_begin,mr.ri.allowed_end);
 
     log(mr.flags.verbose,"\nSTARTING RECONSTRUCTION\n\n");
+
+
+    size_t n_proj_rebin_chunk=5000;
+    size_t kwic_blocks=5;
+    //size_t kwic_blocks=mr.rp.n_readings/n_proj_rebin_chunk;
+ 
+
     
-    for (int i=0;i<mr.ri.n_blocks;i++){
-	
+    for (int i=0;i<kwic_blocks;i++){
+
+	/* override idx_pull_start and n_proj_pull after each block update */
+	mr.ri.idx_pull_start=i*n_proj_rebin_chunk;
+	mr.ri.idx_pull_end=(i+1)*n_proj_rebin_chunk;
+
 	update_block_info(&mr);
+	printf("%lu\n",mr.ri.idx_pull_start);
+	printf("%lu\n",mr.ri.idx_pull_end);
+	printf("%lu\n",mr.ri.n_proj_pull);
 	
 	log(mr.flags.verbose,"----------------------------\n"
-	    "Working on block %d of %d \n",i+1,mr.ri.n_blocks);
+	    "Working on block %d of %d \n",i+1,kwic_blocks);
 	
 	// Step 3: Extract raw data from file into memory
 	log(mr.flags.verbose,"Reading raw data from file...\n");
@@ -259,11 +279,15 @@ int main(int argc, char ** argv){
 	    cudaEventRecord(bench_start);
 	}
 
+	printf("%.2f\n",mr.cg.central_channel);
+	
 	if (mr.flags.no_gpu==1)
 	    rebin_filter_cpu(&mr);
 	else
 	    rebin_filter(&mr);
 
+	printf("%.2f\n",mr.cg.central_channel);
+	
 	if (mr.flags.timing){
 	    cudaEventRecord(stop);
 	    cudaEventSynchronize(stop);
@@ -283,52 +307,20 @@ int main(int argc, char ** argv){
 	    cudaEventDestroy(bench_start);
 	    cudaEventDestroy(bench_stop);
 	}
-	
-	/* --- Step 5 handled by functions in backproject.cu ---*/
-	// Step 5: Backproject
-	log(mr.flags.verbose,"Backprojecting...\n");
 
-	if (mr.flags.timing){
-	    cudaEventCreate(&start);
-	    cudaEventCreate(&stop);
-	    cudaEventRecord(start);
-	}
-
-	if (mr.flags.benchmark){
-	    cudaEventCreate(&bench_start);
-	    cudaEventCreate(&bench_stop);
-	    cudaEventRecord(bench_start);
-	}
-
-	if (mr.flags.no_gpu==1)
-	    backproject_cpu(&mr);
-	else
-	    backproject(&mr);
-
-	if (mr.flags.timing){
-	    cudaEventRecord(stop);
-	    cudaEventSynchronize(stop);
-	    float milli=0.0f;
-	    cudaEventElapsedTime(&milli,start,stop);
-	    printf("%.2f ms to backproject\n",milli);
-	    cudaEventDestroy(start);
-	    cudaEventDestroy(stop);
-	}
-	
-	if (mr.flags.benchmark){
-	    cudaEventRecord(bench_stop);
-	    cudaEventSynchronize(bench_stop);
-	    float milli=0.0f;
-	    cudaEventElapsedTime(&milli,bench_start,bench_stop);
-	    // write the benchmark data to file
-	    fwrite(&milli,sizeof(float),1,benchmark_file);
-	    cudaEventDestroy(bench_start);
-	    cudaEventDestroy(bench_stop);
-	}
-	
+	// Copy rebin chunk over to full rebin_array
+	size_t rebin_idx_start=mr.ri.idx_pull_start/mr.ri.n_ffs;
+	size_t rebin_idx_end=mr.ri.idx_pull_end/mr.ri.n_ffs;
+	size_t rebin_size=mr.cg.n_channels_oversampled*mr.cg.n_rows*mr.ri.n_proj_pull/mr.ri.n_ffs;
+	memcpy(&mr.ctd.full_rebin[i*n_proj_rebin_chunk/mr.ri.n_ffs*mr.cg.n_channels_oversampled*mr.cg.n_rows],mr.ctd.rebin,rebin_size*sizeof(float));
+	write_float(mr.ctd.rebin,rebin_size,"/home/john/Desktop/rebin_test.bin");
     }
 
-
+    // Write the Full rebin out to disk
+    //write_float(mr.ctd.full_rebin,mr.cg.n_channels_oversampled*mr.cg.n_rows*mr.rp.n_readings/mr.ri.n_ffs,"/home/john/Desktop/rebinned_raw.bin");
+    write_float(mr.ctd.full_rebin,mr.cg.n_channels_oversampled*mr.cg.n_rows*kwic_blocks*n_proj_rebin_chunk/mr.ri.n_ffs,"/home/john/Desktop/rebinned_raw.bin");
+    write_float(mr.tube_angles,kwic_blocks*n_proj_rebin_chunk/mr.ri.n_ffs,"/home/john/Desktop/tube_angles.bin");    
+    
     // Step 6: Save image data to disk (found in setup.cu)
     log(mr.flags.verbose,"----------------------------\n\n");
     log(mr.flags.verbose,"Writing image data to %s%s.img\n",mr.output_dir,mr.rp.raw_data_file);

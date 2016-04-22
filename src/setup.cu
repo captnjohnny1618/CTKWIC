@@ -264,6 +264,7 @@ struct ct_geom configure_ct_geom(struct recon_metadata *mr){
 	// Next attempt to find the file in the "resources" directory of the project
 	strcpy(path,mr->install_dir);
 	strcat(path,"/resources/scanners/");
+	printf("%s\n",path);
 	strcat(path,mr->rp.scanner);
 	cg_file=fopen(path,"r");
 	if (cg_file==NULL){
@@ -327,11 +328,11 @@ struct ct_geom configure_ct_geom(struct recon_metadata *mr){
 	    }
 	    else if (strcmp(token,"NProjTurn:")==0){
 		token=strtok(NULL," \t\n%");
-		sscanf(token,"%i",&cg.n_proj_turn);
+		sscanf(token,"%lu",&cg.n_proj_turn);
 	    }
 	    else if (strcmp(token,"NChannels:")==0){
 		token=strtok(NULL," \t\n%");
-		sscanf(token,"%i",&cg.n_channels);
+		sscanf(token,"%lu",&cg.n_channels);
 	    }
 	    else if (strcmp(token,"ReverseRowInterleave:")==0){
 		token=strtok(NULL," \t\n%");
@@ -347,7 +348,7 @@ struct ct_geom configure_ct_geom(struct recon_metadata *mr){
 	    
 	    token=strtok(NULL," \t\n%"); 
 	}
-	
+
 	free(cg_buffer);
     }
 
@@ -601,16 +602,6 @@ void configure_reconstruction(struct recon_metadata *mr){
 	fclose(outfile);
     }
 
-    if (((rp.start_pos>allowed_begin)&&(rp.start_pos>allowed_end))||((rp.start_pos<allowed_begin)&&(rp.start_pos<allowed_end))){
-	printf("Requested reconstruction is outside of allowed data range: %.2f to %.2f\n",allowed_begin,allowed_end);
-	exit(1);
-    }
-    
-    if (((rp.end_pos>allowed_begin)&&(rp.end_pos>allowed_end))||((rp.end_pos<allowed_begin)&&(rp.end_pos<allowed_end))){
-	printf("Requested reconstruction is outside of allowed data range: %.2f to %.2f\n",allowed_begin,allowed_end);
-	exit(1);
-    }
-
     // We always pull projections in the order they occur in the raw
     // data.  If the end_pos comes before the start position in the
     // array, we use the end_pos as the "first" slice to pull
@@ -667,6 +658,7 @@ void configure_reconstruction(struct recon_metadata *mr){
     mr->ctd.raw=(float*)calloc(cg.n_channels*cg.n_rows_raw*n_proj_pull,sizeof(float));
     mr->ctd.rebin=(float*)calloc(cg.n_channels_oversampled*cg.n_rows*(n_proj_pull-2*cg.add_projections_ffs)/n_ffs,sizeof(float));
     mr->ctd.image=(float*)calloc(rp.nx*rp.ny*n_slices_recon,sizeof(float));
+    mr->ctd.full_rebin=(float*)calloc(cg.n_channels_oversampled*cg.n_rows*(mr->rp.n_readings)/n_ffs,sizeof(float));
 }
 
 void update_block_info(recon_metadata *mr){
@@ -681,43 +673,8 @@ void update_block_info(recon_metadata *mr){
     /* --- Figure out how many and which projections to grab --- */
     int n_ffs=pow(2,rp.z_ffs)*pow(2,rp.phi_ffs);
 
-    int recon_direction=fabs(rp.end_pos-rp.start_pos)/(rp.end_pos-rp.start_pos);
-    if (recon_direction!=1&&recon_direction!=-1) // user requests one slice (end_pos==start_pos)
-	recon_direction=1;
-    
-    float block_slice_start=ri.recon_start_pos+recon_direction*ri.cb.block_idx*rp.coll_slicewidth*ri.n_slices_block;
-    float block_slice_end=block_slice_start+recon_direction*(ri.n_slices_block-1)*rp.coll_slicewidth;
-    int array_direction=fabs(mr->table_positions[100]-mr->table_positions[0])/(mr->table_positions[100]-mr->table_positions[0]);
-    int idx_block_slice_start=array_search(block_slice_start,mr->table_positions,rp.n_readings,array_direction);
-    int idx_block_slice_end=array_search(block_slice_end,mr->table_positions,rp.n_readings,array_direction);
-
-    // We always pull projections in the order they occur in the raw
-    // data.  If the end_pos comes before the start position in the
-    // array, we use the end_pos as the "first" slice to pull
-    // projections for.  This method will take into account the
-    // ordering of projections with ascending or descending table
-    // position, as well as any slice ordering the user requests.
-    
-    int idx_pull_start;
-    int idx_pull_end;
-
-    int pre_post_buffer=cg.n_proj_ffs/2;
-    if (rp.z_ffs==1){
-	pre_post_buffer=cg.n_proj_ffs/2;
-    }
-
-    if (idx_block_slice_start>idx_block_slice_end){
-	idx_pull_start=idx_block_slice_end-pre_post_buffer-cg.add_projections_ffs;
-	idx_pull_start=(idx_pull_start-1)+(n_ffs-(idx_pull_start-1)%n_ffs);
-	idx_pull_end=idx_block_slice_start+pre_post_buffer+cg.add_projections_ffs;
-	idx_pull_end=(idx_pull_end-1)+(n_ffs-(idx_pull_end-1)%n_ffs);
-    }
-    else{
-	idx_pull_start=idx_block_slice_start-pre_post_buffer-cg.add_projections_ffs;
-	idx_pull_start=(idx_pull_start-1)+(n_ffs-(idx_pull_start-1)%n_ffs);
-	idx_pull_end=idx_block_slice_end+pre_post_buffer+cg.add_projections_ffs;
-	idx_pull_end=(idx_pull_end-1)+(n_ffs-(idx_pull_end-1)%n_ffs);
-    }
+    int idx_pull_start=ri.idx_pull_start;
+    int idx_pull_end=ri.idx_pull_end;
 
     idx_pull_end+=256;
    
@@ -728,10 +685,10 @@ void update_block_info(recon_metadata *mr){
     idx_pull_end=idx_pull_start+n_proj_pull;
     
     // copy this info into our recon metadata
-    mr->ri.cb.block_slice_start=block_slice_start;
-    mr->ri.cb.block_slice_end=block_slice_end;
-    mr->ri.cb.idx_block_slice_start=idx_block_slice_start;
-    mr->ri.cb.idx_block_slice_end=idx_block_slice_end; 
+    //mr->ri.cb.block_slice_start=block_slice_start;
+    //mr->ri.cb.block_slice_end=block_slice_end;
+    //mr->ri.cb.idx_block_slice_start=idx_block_slice_start;
+    //mr->ri.cb.idx_block_slice_end=idx_block_slice_end; 
 
     mr->ri.idx_pull_start=idx_pull_start;
     mr->ri.idx_pull_end=idx_pull_end;
@@ -741,8 +698,7 @@ void update_block_info(recon_metadata *mr){
 
     // Reallocate our raw and rebin arrays to account for changing n_proj_pull
     mr->ctd.raw=(float*)calloc(cg.n_channels*cg.n_rows_raw*n_proj_pull,sizeof(float));
-    mr->ctd.rebin=(float*)calloc(cg.n_channels_oversampled*cg.n_rows*(n_proj_pull-2*cg.add_projections_ffs)/n_ffs,sizeof(float));
-    
+    mr->ctd.rebin=(float*)calloc(cg.n_channels_oversampled*cg.n_rows*(n_proj_pull-2*cg.add_projections_ffs)/n_ffs,sizeof(float));    
 }
 
 void extract_projections(struct recon_metadata * mr){

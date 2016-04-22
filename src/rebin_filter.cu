@@ -351,12 +351,12 @@ void rebin_pffs(struct recon_metadata *mr){
 	p1_rebin<<<blocks_rebin,threads_rebin,0,stream1>>>(d_output,da,i,d_beta_lookup);
 	gpuErrchk( cudaPeekAtLastError() );
 	gpuErrchk( cudaDeviceSynchronize() );
-	filter<<<blocks_filter,threads_filter,shared_size,stream1>>>(d_output,i);
+	//filter<<<blocks_filter,threads_filter,shared_size,stream1>>>(d_output,i);
 	    
 	p2_rebin<<<blocks_rebin,threads_rebin,0,stream2>>>(d_output,da,i+1,d_beta_lookup);
 	gpuErrchk( cudaPeekAtLastError() );
 	gpuErrchk( cudaDeviceSynchronize() );
-	filter<<<blocks_filter,threads_filter,shared_size,stream2>>>(d_output,i+1);
+	//filter<<<blocks_filter,threads_filter,shared_size,stream2>>>(d_output,i+1);
 	
     }
 
